@@ -17,6 +17,7 @@
 package de.gematik.vau.lib;
 
 
+import de.gematik.vau.lib.cbor.VAUAutCertificateWithChain;
 import de.gematik.vau.lib.crypto.KEM;
 import de.gematik.vau.lib.data.*;
 import de.gematik.vau.lib.exceptions.VauEncryptionException;
@@ -30,8 +31,13 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.bouncycastle.util.encoders.Hex;
 
+import com.fasterxml.jackson.dataformat.cbor.databind.CBORMapper;
+
+import java.io.InputStream;
+import java.net.URL;
 import java.security.InvalidKeyException;
 import java.util.Arrays;
+import java.util.HexFormat;
 
 /**
  * State machine for the VaU client. An instance of this class is created for each connection.
@@ -45,6 +51,7 @@ public class VauClientStateMachine extends AbstractVauStateMachine {
   private KdfKey2 clientKey2;
   private byte[] transcriptClient = new byte[0];
   private long requestCounter = 0;
+  private SignedPublicVauKeys signedPublicVauKeys;
 
   public VauClientStateMachine(boolean isPu) {
     super(isPu);
@@ -93,8 +100,7 @@ public class VauClientStateMachine extends AbstractVauStateMachine {
     KdfMessage clientKemResult1 = KEM.decapsulateMessages(vauMessage2, clientKey1);
     kdfClientKey1 = KEM.kdf(clientKemResult1);
     byte[] transferredSignedServerPublicKey = KEM.decryptAead(kdfClientKey1.getServerToClient(), vauMessage2.getAeadCt());
-
-    SignedPublicVauKeys signedPublicVauKeys;
+    
     try{
       signedPublicVauKeys = decodeCborMessageToClass(transferredSignedServerPublicKey, SignedPublicVauKeys.class);
     } catch (Exception e) {
@@ -102,6 +108,9 @@ public class VauClientStateMachine extends AbstractVauStateMachine {
     }
 
     VauPublicKeys transferredSignedServerPublicKeyList = signedPublicVauKeys.extractVauKeys();
+
+
+
     checkCertificateExpired(transferredSignedServerPublicKeyList.getExp());
 
     verifyClientMessageIsWellFormed(transferredSignedServerPublicKeyList.getEcdhPublicKey(), transferredSignedServerPublicKeyList);
@@ -131,6 +140,32 @@ public class VauClientStateMachine extends AbstractVauStateMachine {
     byte[] message3Encoded = encodeUsingCbor(message3);
     transcriptClient = ArrayUtils.addAll(transcriptClient, message3Encoded);
     return message3Encoded;
+  }
+
+    /**
+   * Returns the VAU certificate for the given EPA URL and version. The certificate is retrieved from the URL constructed using the cert hash from the signed public VAU keys and the version.
+   * https://gemspec.gematik.de/docs/gemSpec/gemSpec_Krypt/latest/#A_24957
+   * @param epaUrl
+   * @param version
+   * @return
+  */
+  public VAUAutCertificateWithChain extractVAUAutCertificateWithChain(SignedPublicVauKeys signedPublicVauKeys, String epaUrl, String version) {
+    var certHashHex = HexFormat.of().formatHex(signedPublicVauKeys.getCertHash());
+
+    log.trace("Returning VAU certificate for EPA URL {} with cert hash {}", epaUrl, certHashHex);
+
+    try {
+      var url = new URL(epaUrl + "/CertData." + certHashHex+"-"+version);
+      url.openConnection().connect();
+      InputStream inputStream = url.openStream();
+      // read CBOR certificate and convert to X509Certificate
+      var cborMapper = CBORMapper.builder().build();
+      VAUAutCertificateWithChain vauAutCertificateWithChain = cborMapper.readValue(inputStream, VAUAutCertificateWithChain.class);
+      
+      return vauAutCertificateWithChain;
+    } catch(Exception e) {
+      throw new IllegalArgumentException("Could not create URL for VAU certificate with EPA URL " + epaUrl + " and cert hash " + certHashHex + " and version "+version, e);
+    }
   }
 
   /**
