@@ -22,8 +22,13 @@
 
     <groupId>de.servicehealth.epa4all.libvau</groupId>
     <artifactId>lib-vau</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <properties>
+        <!-- Default for standalone/other-project builds. The epa4all release
+             workflow overrides it with -Drevision=<this submodule's date tag>
+             only when lib-vau sources changed since the previous release. -->
+        <revision>2026-05-18</revision>
+
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -135,6 +140,33 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <!-- Resolves ${revision} in the installed/deployed POM so this
+                     library stays consumable by other projects. -->
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
